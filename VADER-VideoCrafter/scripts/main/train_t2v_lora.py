@@ -700,93 +700,93 @@ def run_training(args, **kwargs):
             vis_dict = {}
 
             # video validation loop
-            for n in range(args.num_val_runs):
-                # set random seed for each process
-                random.seed(args.seed + n)
-                torch.manual_seed(args.seed + n)
+            # set random seed for each process
+            random.seed(args.seed)
+            torch.manual_seed(args.seed)
 
-                #prompts_all, promt_metadata = zip(
-                #    *[prompt_fn(args.nouns_file, args.activities_file) for _ in range(args.val_batch_size * accelerator.num_processes)] # get val_batch_size prompts in a tuple
-                #    )
-                prompts_all = load_prompts_from_json(args.json_file)
-                prompts_all = list(prompts_all)
+            #prompts_all, promt_metadata = zip(
+            #    *[prompt_fn(args.nouns_file, args.activities_file) for _ in range(args.val_batch_size * accelerator.num_processes)] # get val_batch_size prompts in a tuple
+            #    )
+            prompts_all = load_prompts_from_json(args.json_file)
+            prompts_all = list(prompts_all)
 
-                with accelerator.split_between_processes(prompts_all) as val_prompt:
-                    #assert len(val_prompt) == args.val_batch_size
-                    # store output of generations in dict
-                    results=dict(filenames=[],dir_name=[], prompt=[], gpu_no=[])
+            with accelerator.split_between_processes(prompts_all) as val_prompt:
+                #assert len(val_prompt) == args.val_batch_size
+                # store output of generations in dict
+                results=dict(filenames=[],dir_name=[], prompt=[], gpu_no=[])
 
-                    # Inference Step 3.1: forward pass
-                    batch_size = len(val_prompt) ########MODIFY
-                    noise_shape = [batch_size, channels, frames, h, w]
+                # Inference Step 3.1: forward pass
+                batch_size = len(val_prompt) ########MODIFY
+                noise_shape = [batch_size, channels, frames, h, w]
 
-                    fps = torch.tensor([args.fps]*batch_size).to(accelerator.device).long()
+                fps = torch.tensor([args.fps]*batch_size).to(accelerator.device).long()
 
-                    for prompts in val_prompt:
-                        if isinstance(prompts, str):
-                            prompts = [prompts]
-                        
-
-                        with accelerator.autocast():            # mixed precision
-                            if isinstance(peft_model, torch.nn.parallel.DistributedDataParallel):
-                                text_emb = peft_model.module.get_learned_conditioning(prompts).to(accelerator.device)
-                            else:
-                                text_emb = peft_model.get_learned_conditioning(prompts).to(accelerator.device)
-
-                            if args.mode == 'base':
-                                cond = {"c_crossattn": [text_emb], "fps": fps}
-                            else:   # TODO: implement i2v mode training in the future
-                                raise NotImplementedError
-
-                            # Inference Step 3.2: inference, batch_samples shape: batch, <samples>, c, t, h, w
-                            # no backprop_mode=args.backprop_mode because it is inference process 
-                            if isinstance(peft_model, torch.nn.parallel.DistributedDataParallel):
-                                batch_samples = batch_ddim_sampling(peft_model.module, cond, noise_shape, args.n_samples, \
-                                                                    args.ddim_steps, args.ddim_eta, args.unconditional_guidance_scale, None, decode_frame=args.decode_frame, **kwargs)
-                            else:
-                                batch_samples = batch_ddim_sampling(peft_model, cond, noise_shape, args.n_samples, \
-                                                                        args.ddim_steps, args.ddim_eta, args.unconditional_guidance_scale, None, decode_frame=args.decode_frame, **kwargs)
-                        
-                        # batch_samples: b,samples,c,t,h,w
-                        dir_name = os.path.join(output_dir, "samples", f"step_{global_step}")
-                        # filenames should be related to the gpu index
-                        filenames = [f"{n}_{accelerator.local_process_index}_{id+1:04d}" for id in range(batch_samples.shape[0])] # from 0 to batch size, n is the index of the batch
-                        # if dir_name is not exists, create it
-                        os.makedirs(dir_name, exist_ok=True)
-
-                        save_videos(batch_samples, dir_name, filenames, fps=args.savefps)
-
-                        results["filenames"].extend(filenames)
-                        results["dir_name"].extend([dir_name]*len(filenames))
-                        results["prompt"].extend(prompts)
-                        results=[ results ] # transform to list, otherwise gather_object() will not collect correctly
+                for prompts in val_prompt:
+                    if isinstance(prompts, str):
+                        prompts = [prompts]
                     
-                        # Inference Step 3.3: collect inference results and save the videos to wandb
-                        # collect inference results from all the GPUs
-                        results_gathered=gather_object(results)
 
-                        if accelerator.is_main_process:
-                            filenames = []
-                            dir_name = []
-                            prompts = []
-                            for i in range(len(results_gathered)):
-                                filenames.extend(results_gathered[i]["filenames"])
-                                dir_name.extend(results_gathered[i]["dir_name"])
-                                prompts.extend(results_gathered[i]["prompt"])
-                            
-                            # upload the video and their corresponding prompt to wandb
-                            if args.use_wandb:
-                                for i, filename in enumerate(filenames):
-                                    video_path = os.path.join(dir_name[i], f"{filename}.mp4")
-                                    vis_dict[f"{n}_sample_{i}"] = wandb.Video(video_path, fps=args.savefps, caption=prompts[i])
+                    with accelerator.autocast():            # mixed precision
+                        if isinstance(peft_model, torch.nn.parallel.DistributedDataParallel):
+                            text_emb = peft_model.module.get_learned_conditioning(prompts).to(accelerator.device)
+                        else:
+                            text_emb = peft_model.get_learned_conditioning(prompts).to(accelerator.device)
 
-                            accelerator.log(vis_dict, step=global_step)
-                            del batch_samples
-                            logger.info("Validation sample saved!")
-                        torch.cuda.empty_cache()
-                        gc.collect()
-                        progress_bar.update(args.val_batch_size)
-        
+                        if args.mode == 'base':
+                            cond = {"c_crossattn": [text_emb], "fps": fps}
+                        else:   # TODO: implement i2v mode training in the future
+                            raise NotImplementedError
+
+                        # Inference Step 3.2: inference, batch_samples shape: batch, <samples>, c, t, h, w
+                        # no backprop_mode=args.backprop_mode because it is inference process 
+                        if isinstance(peft_model, torch.nn.parallel.DistributedDataParallel):
+                            batch_samples = batch_ddim_sampling(peft_model.module, cond, noise_shape, args.n_samples, \
+                                                                args.ddim_steps, args.ddim_eta, args.unconditional_guidance_scale, None, decode_frame=args.decode_frame, **kwargs)
+                        else:
+                            batch_samples = batch_ddim_sampling(peft_model, cond, noise_shape, args.n_samples, \
+                                                                    args.ddim_steps, args.ddim_eta, args.unconditional_guidance_scale, None, decode_frame=args.decode_frame, **kwargs)
+                    
+                    # batch_samples: b,samples,c,t,h,w
+                    dir_name = os.path.join(output_dir, "samples", f"step_{global_step}")
+                    # filenames should be related to the gpu index
+                    filenames = [f"{accelerator.local_process_index}_{id+1:04d}" for id in range(batch_samples.shape[0])] # from 0 to batch size, n is the index of the batch
+                    # if dir_name is not exists, create it
+                    os.makedirs(dir_name, exist_ok=True)
+
+                    save_videos(batch_samples, dir_name, filenames, fps=args.savefps)
+
+                    results["filenames"].extend(filenames)
+                    results["dir_name"].extend([dir_name]*len(filenames))
+                    results["prompt"].extend(prompts)
+                    results=[ results ] # transform to list, otherwise gather_object() will not collect correctly
+                
+                    # Inference Step 3.3: collect inference results and save the videos to wandb
+                    # collect inference results from all the GPUs
+                    results_gathered=gather_object(results)
+
+                    if accelerator.is_main_process:
+                        filenames = []
+                        dir_name = []
+                        prompts = []
+                        for i in range(len(results_gathered)):
+                            filenames.extend(results_gathered[i]["filenames"])
+                            dir_name.extend(results_gathered[i]["dir_name"])
+                            prompts.extend(results_gathered[i]["prompt"])
+                        
+                        # upload the video and their corresponding prompt to wandb
+                        if args.use_wandb:
+                            for i, filename in enumerate(filenames):
+                                video_path = os.path.join(dir_name[i], f"{filename}.mp4")
+                                vis_dict[f"_sample_{i}"] = wandb.Video(video_path, fps=args.savefps, caption=prompts[i])
+
+                        accelerator.log(vis_dict, step=global_step)
+                        
+                        logger.info("Validation sample saved!")
+                    del batch_samples
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    progress_bar.update(args.val_batch_size)
+    
         return
     # end of inference only, training script continues
     # ==================================================================

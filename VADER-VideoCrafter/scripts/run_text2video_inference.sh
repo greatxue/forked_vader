@@ -17,8 +17,7 @@ accelerate launch --multi_gpu --main_process_port $PORT scripts/main/train_t2v_l
 --num_val_runs 1 \
 --lora_rank 16 \
 --inference_only True \
---project_dir 'VADER-VideoCrafter/*******output_video/videos.json' \
---json_file '*******json_folder/onput_part_1.json' \
+--project_dir '/home/wenhao/Project/greatxue/MJ-Bench-2.0/gen_video/video_to_upload/video_vader/video' \
+--json_file '/home/wenhao/Project/greatxue/MJ-Bench-2.0/gen_video/json/json_backup/input_part_2.json' \
 --lora_ckpt_path huggingface-pickscore \
 --is_sample_preview True
---mixed_precision 'fp16'
