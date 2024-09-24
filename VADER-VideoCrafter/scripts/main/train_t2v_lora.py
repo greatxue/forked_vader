@@ -123,6 +123,8 @@ def get_parser():
     parser.add_argument("--lora_ckpt_path", type=str, default=None, help="LoRA checkpoint path")
     parser.add_argument("--lora_rank", type=int, default=8, help="LoRA rank")
     parser.add_argument("--txt_file_path", type=str, default=None, help="path to txt file containing prompts")
+    parser.add_argument('--json_file', type=str, help='Path to the JSON file containing prompts')
+    
 
     return parser
 
@@ -706,7 +708,7 @@ def run_training(args, **kwargs):
                 #prompts_all, promt_metadata = zip(
                 #    *[prompt_fn(args.nouns_file, args.activities_file) for _ in range(args.val_batch_size * accelerator.num_processes)] # get val_batch_size prompts in a tuple
                 #    )
-                prompts_all = load_prompts_from_json('/home/wenhao/Project/greatxue/MJ-Bench-2.0/gen_video/json/json_backup/input_part_2.json')
+                prompts_all = load_prompts_from_json(args.json_file)
                 prompts_all = list(prompts_all)
 
                 with accelerator.split_between_processes(prompts_all) as val_prompt:
